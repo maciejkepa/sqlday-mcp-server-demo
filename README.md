@@ -1,0 +1,1 @@
+# sqlday-mcp-server-demo
