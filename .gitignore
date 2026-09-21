@@ -1,0 +1,16 @@
+.venv/
+.uv-cache/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+.env
+.env.*
+!.env.example
+artifacts/
+demo-workspaces/
+*.local.json
+*.local.toml
+infra/*.json
+!infra/*.example.json
+tests/*

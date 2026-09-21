@@ -1,0 +1,1 @@
+"""AdventureWorks MCP demo."""
