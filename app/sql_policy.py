@@ -1,4 +1,4 @@
-"""A deliberately narrow T-SQL surface; database permissions remain the security boundary."""
+"""Read-only T-SQL validation against an explicit object allowlist."""
 
 import logging
 

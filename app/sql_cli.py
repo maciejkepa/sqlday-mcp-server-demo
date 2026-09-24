@@ -1,4 +1,4 @@
-"""Neutral terminal interface, with no MCP and no business rules."""
+"""Read-only SQL command-line interface."""
 
 import argparse
 import json

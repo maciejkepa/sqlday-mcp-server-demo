@@ -1,244 +1,182 @@
 # SQLDay: AdventureWorksLT + MCP + Codex
 
-Mały serwer MCP w Pythonie: agent poznaje schemat i reguły biznesowe, a następnie sam pisze SQL.
-Serwer udostępnia **3 narzędzia** (`get_schema`, `get_business_rules`, `query_sql`) i zasób
-`adventureworks://business-rules`. Nie wymaga własnego modelu ani klucza OpenAI.
+Serwer MCP w Pythonie udostępniający bazę AdventureWorksLT do analiz przez Codex.
+Agent poznaje schemat i reguły biznesowe, a następnie wykonuje zapytania T-SQL przez
+trzy narzędzia: `get_schema`, `get_business_rules` i `query_sql`.
+Reguły są dostępne również jako zasób `adventureworks://business-rules`.
 
-```mermaid
-flowchart LR
-    A[Codex z MCP] -->|HTTPS /mcp| B[Azure Container Apps]
-    B --> C[Azure SQL: AdventureWorksLT_MCPDemo]
-    B --> D[Reguły biznesowe]
-    E[Codex bez MCP] -->|Python CLI| C
-```
+**[Przykładowe pytania](docs/example-questions.md)** ·
+**[Reguły biznesowe](docs/business-rules.md)** ·
+**[Przygotowanie bazy i Azure](docs/azure-setup.md)**
 
-## Co jest w repozytorium
+## Wymagania
 
-| Element | Przeznaczenie |
-|---|---|
-| `app/server.py` | Kod pokazywany na scenie: dekoratory, narzędzia, zasób, HTTP i Bearer |
-| `app/database.py`, `app/sql_policy.py` | Wspólny odczyt SQL, metadane, limity i walidacja |
-| `app/sql_cli.py` | Dostęp do tej samej bazy bez MCP |
-| `MCP instrukcje.md` | Jedno źródło reguł; wersja to skrót SHA-256 treści |
-| `presenter/` | Prywatne przygotowanie danych i weryfikacja odpowiedzi |
-| `infra/`, `scripts/` | Bicep, wdrożenie, firewall, smoke test i eksport stanowisk |
-| `docs/demo.md` | Scenariusz 25–30 minut i tabela do trzech prób |
+- Python 3.12 i [uv](https://docs.astral.sh/uv/getting-started/installation/).
+- Microsoft ODBC Driver 18 for SQL Server: [Windows](https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server)
+  lub [Ubuntu](https://learn.microsoft.com/en-us/sql/connect/odbc/linux-mac/installing-the-microsoft-odbc-driver-for-sql-server).
+  Sterownik musi mieć architekturę zgodną z Pythonem.
+- Przygotowana baza `AdventureWorksLT_MCPDemo` i konto SQL do odczytu.
+  Dane do połączenia otrzymasz od prowadzącego; własną bazę przygotujesz według
+  [instrukcji Azure](docs/azure-setup.md).
+- Node.js z npm do instalacji Codex CLI.
 
-**Nie uruchamiaj pojedynku w tym repozytorium.** Zawiera odpowiedzi, dane seed i zapytania
-referencyjne. Eksportuj osobne stanowiska zgodnie z instrukcją poniżej. `.dockerignore` działa
-jako lista dozwolonych plików. Skrypt wdrożenia dodatkowo kopiuje tylko nazwane pliki aplikacji
-do osobnego katalogu tymczasowego i przekazuje ten katalog do ACR. Dzięki temu Azure CLI nie
-przegląda lokalnych cache, sekretów ani materiałów prowadzącego. Katalog jest usuwany po budowaniu.
+Polecenia poniżej uruchamiaj z katalogu repozytorium. Mają tę samą składnię na
+Windowsie (cmd lub PowerShell) i Ubuntu (Bash), bez aktywowania środowiska wirtualnego.
+W WSL instaluj Python, uv, ODBC i Codex po stronie Ubuntu.
 
-## 1. Wymagania
+## Uruchomienie serwera
 
-Na Windows domyślna polityka PowerShell może blokować wszystkie pliki `.ps1`.
-Przed uruchomieniem skryptów z tego repozytorium dopuść lokalne skrypty **tylko w bieżącym terminalu**:
+Zainstaluj zależności i utwórz lokalną konfigurację:
 
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force
-```
-
-Zmiana wygasa po zamknięciu terminala i nie wymaga administratora. Jeśli politykę narzuca
-organizacja (`MachinePolicy` lub `UserPolicy` w `Get-ExecutionPolicy -List`), ustawienie
-sesji jej nie nadpisze. [Dokumentacja Microsoft](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies)
-
-- Python 3.12 i `uv`; wersje pakietów są zapisane w `uv.lock` (MCP SDK **2.2.0**).
-- Microsoft **ODBC Driver 18 for SQL Server**, w architekturze interpretera Python
-  (na Windows ARM z Pythonem x64 instaluj sterownik x64).
-- Do Azure: Azure CLI, uprawnienia do wdrożeń, SQL i przypisania `AcrPull` w grupie zasobów.
-- Do inspektora: Node.js z `npx`. Docker Desktop jest opcjonalny — Azure ACR potrafi budować obraz.
-
-```powershell
+```sh
 uv sync --frozen
-uv run --frozen pytest -q
+uv run --frozen python -m scripts.configure
+```
+
+Skrypt tworzy `.env` z losowym hasłem czytelnika i tokenem MCP. Nie nadpisuje istniejącego
+pliku. Dla istniejącej bazy zastąp `AW_SQL_PASSWORD` otrzymanym hasłem. Uzupełnij:
+
+| Zmienna | Wartość |
+|---|---|
+| `AW_SQL_SERVER` | Adres serwera, np. `your-server.database.windows.net` |
+| `AW_SQL_DATABASE` | `AdventureWorksLT_MCPDemo` |
+| `AW_SQL_USER` | Konto do odczytu, domyślnie `aw_demo_reader` |
+| `AW_SQL_PASSWORD` | Hasło tego konta |
+| `AW_MCP_TOKEN` | Losowy token, co najmniej 32 znaki |
+| `AW_ALLOWED_HOSTS` | Dozwolone hosty, domyślnie `localhost,127.0.0.1` |
+
+`.env` zawiera lokalne sekrety i jest ignorowany przez Git. Na firewallu SQL musi być
+dopuszczony publiczny adres IP komputera uruchamiającego serwer.
+
+```sh
+uv run --frozen --env-file .env uvicorn app.server:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log --log-config app/logging.json
+```
+
+Endpoint MCP: `http://127.0.0.1:8000/mcp`. Pozostaw ten terminal otwarty.
+W drugim terminalu sprawdź uwierzytelnienie, narzędzia i połączenie z bazą:
+
+```sh
+uv run --frozen --env-file .env python -m scripts.smoke --url http://127.0.0.1:8000/mcp
+```
+
+`http://127.0.0.1:8000/health` sprawdza tylko działanie procesu.
+Plik `.env` jest ładowany przez `--env-file`, nie przez samą aplikację.
+
+### Docker
+
+Docker instaluje Python i ODBC wewnątrz obrazu. Potrzebujesz Docker Engine na Ubuntu
+lub Docker Desktop z kontenerami Linux na Windowsie oraz uzupełnionego `.env`.
+
+```sh
+docker build -t adventureworks-mcp .
+docker run --rm --env-file .env -p 127.0.0.1:8000:8000 adventureworks-mcp
+```
+
+## Instalacja i podłączenie Codex CLI
+
+Zainstaluj Codex przez npm, a następnie zaloguj się:
+
+```sh
+npm install -g @openai/codex
+codex login
+```
+
+Dodaj uruchomiony serwer:
+
+```sh
+codex mcp add adventureworks --url http://127.0.0.1:8000/mcp --bearer-token-env-var AW_MCP_TOKEN
+codex mcp list
+```
+
+Konfiguracja jest zapisywana w `~/.codex/config.toml` (na Windowsie w katalogu
+użytkownika). Uruchom Codex z tokenem załadowanym z `.env`:
+
+```sh
+uv run --frozen --env-file .env codex
+```
+
+W Codex wpisz `/mcp` i sprawdź dostępność narzędzi serwera `adventureworks`.
+Następnie użyj pytania z [docs/example-questions.md](docs/example-questions.md), np.:
+
+> Użyj narzędzi MCP AdventureWorks. Jaki był rozpoznany przychód netto ze sprzedaży
+> zewnętrznej w Q1 2025? Podaj wartość i wyjaśnij zastosowane reguły biznesowe.
+
+Dla serwera udostępnionego przez prowadzącego użyj jego adresu HTTPS `/mcp` i tokenu.
+Nie musisz wtedy uruchamiać własnego serwera ani mieć dostępu SQL.
+Token musi być dostępny w środowisku procesu Codex; `codex mcp list` potwierdza
+konfigurację, a `/mcp` pozwala sprawdzić połączenie. Ten serwer używa tokenu Bearer,
+więc nie wymaga `codex mcp login`.
+
+Instrukcje: [Codex CLI](https://learn.chatgpt.com/docs/codex/cli)
+i [konfiguracja MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+Sam serwer MCP nie potrzebuje klucza OpenAI; Codex wymaga własnego logowania.
+
+## Porównanie z dostępem bez MCP
+
+Eksporter tworzy dwa katalogi: `with-mcp` z konfiguracją MCP i `without-mcp`
+z interfejsem SQL CLI. Oba zawierają te same pytania. Eksportuj poza repozytorium,
+aby agent nie widział danych przygotowujących demo i zapytań referencyjnych:
+
+```sh
+uv run --frozen python -m scripts.export_workspaces --destination ../sqlday-workspaces --url http://127.0.0.1:8000/mcp
+```
+
+Zależności SQL CLI zainstaluj raz, również z głównego katalogu repozytorium:
+
+```sh
+uv sync --directory ../sqlday-workspaces/without-mcp --frozen --no-dev
+```
+
+Następnie otwórz dwa terminale **w głównym katalogu repozytorium**, gdzie znajduje
+się uzupełniony `.env`, i uruchom po jednym wariancie:
+
+```sh
+uv run --frozen --env-file .env python -m scripts.run_codex ../sqlday-workspaces/with-mcp
+```
+
+```sh
+uv run --frozen --env-file .env python -m scripts.run_codex ../sqlday-workspaces/without-mcp
+```
+
+Launcher przekazuje Codexowi katalog pracy przez `-C`. Zmienne `AW_*` wybiera
+z konfiguracji wczytanej z `.env`: `with-mcp` otrzymuje tylko `AW_MCP_TOKEN`,
+a `without-mcp` wyłącznie dane połączenia SQL czytelnika. Zmienne administratora
+są usuwane ze środowiska obu procesów. Pliku `.env` nie trzeba kopiować ani
+montować w wyeksportowanych katalogach. `uv` jest programem zainstalowanym
+w systemie; nie musi znajdować się w każdym katalogu projektu.
+
+Zaakceptuj zaufanie do `with-mcp`, aby Codex odczytał projektowy
+`.codex/config.toml`, i sprawdź połączenie przez `/mcp`. Launcher wyłącza
+`adventureworks` w wariancie `without-mcp`, również gdy serwer jest skonfigurowany
+globalnie. SQL CLI dziedziczy dane czytelnika z procesu Codex i nie wymaga
+lokalnego `.env`. Przy porównaniu użyj tego samego modelu i nowej rozmowy
+dla każdego pytania.
+
+## Struktura projektu
+
+| Katalog | Zawartość |
+|---|---|
+| `app/` | Narzędzia MCP, autoryzacja, SQL CLI, metadane i walidacja zapytań |
+| `docs/` | Pytania, reguły biznesowe i instrukcja Azure |
+| `scripts/` | Konfiguracja, Azure CLI, smoke test i eksport katalogów demo |
+| `presenter/` | Przygotowanie danych, zapytania referencyjne i weryfikacja wyników |
+| `infra/` | Szablony Bicep bazy, rejestru i Container App |
+| `tests/` | Testy lokalne bez dostępu do Azure SQL |
+
+## Walidacja i diagnostyka
+
+```sh
 uv run --frozen ruff check .
 uv run --frozen ruff format --check .
+uv run --frozen pytest -q
 ```
 
-Bez `AW_RUN_SQL_TESTS=1` testy prawdziwej bazy są pomijane. Pozostałe testują walidację SQL,
-limity, maskowanie błędów, transport MCP, uwierzytelnienie i izolację materiałów demo.
+- `401`: sprawdź zgodność `AW_MCP_TOKEN` w serwerze i Codex.
+- `421`: dopisz hostname endpointu do `AW_ALLOWED_HOSTS` i uruchom serwer ponownie.
+- `SQL_UNAVAILABLE`: sprawdź ODBC, dane logowania i firewall SQL.
+- `SQL_INVALID`: sprawdź składnię T-SQL, nazwy kolumn i uprawnienia czytelnika.
 
-ODBC: [instalator Windows](https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server),
-[instalacja Linux](https://learn.microsoft.com/en-us/sql/connect/odbc/linux-mac/installing-the-microsoft-odbc-driver-for-sql-server).
-Obraz kontenera instaluje sterownik automatycznie.
-
-Skrypty Azure automatycznie wykrywają launcher CLI i korzystają z jego pełnej ścieżki.
-Obsługują również instalację przez `uv tool install azure-cli`, której skrót `az.bat`
-może trafiać na alias Pythona ze sklepu Windows. Aby naprawić także ręczne polecenia
-`az` w bieżącym terminalu, uruchom `scripts/Use-AzureCli.ps1`.
-
-## 2. Przygotowanie pustej grupy Azure
-
-Ustalona subskrypcja: `f2515b68-6632-4afd-b4cc-7f7808fca36d`.
-Grupa: `sqldaylite-demo-rg`. Skrypt odczytuje region istniejącej grupy. Nazwa serwera SQL jest
-deterministyczna i zawiera sufiks zależny od subskrypcji i grupy.
-
-```powershell
-az login
-az account set --subscription f2515b68-6632-4afd-b4cc-7f7808fca36d
-
-# Sekrety losowe, bez wypisywania wartości. Windows zapisuje lokalną kopię zaszyfrowaną DPAPI.
-.\scripts\Initialize-Secrets.ps1 -IncludeAdmin
-
-# Wstaw publiczny IPv4 stanowiska; VPN może zmieniać adres wyjściowy.
-$presenterIp = '<publiczny IPv4>'
-.\scripts\New-DemoDatabase.ps1 -PresenterIPv4 $presenterIp
-
-# AW_SQL_SERVER ustawiany jest przez poprzedni skrypt.
-uv run --frozen python -m presenter.prepare --reset-demo
-uv run --frozen python -m presenter.verify
-```
-
-Powstaje Azure SQL **Basic, 5 DTU, 2 GiB**, z próbką AdventureWorksLT. Nie ma automatycznego
-usypiania. Konto administratora służy wyłącznie przygotowaniu danych. Serwer MCP korzysta
-z `aw_demo_reader`, mającego SELECT i dostęp do metadanych tylko 13 jawnie wybranych obiektów.
-Skrypt resetu nie przyjmie innej nazwy bazy niż `AdventureWorksLT_MCPDemo`; cały reset i
-utworzenie czytelnika odbywają się w jednej transakcji.
-
-`artifacts/demo-secrets.clixml` jest ignorowany przez Git, zaszyfrowany dla bieżącego użytkownika
-Windows i nie trafia do kontenera. Zachowaj ten plik do kolejnych prób; nie kasuj go w celu
-„odświeżenia” konfiguracji istniejącej bazy. W nowej sesji uruchom `Initialize-Secrets.ps1`
-ponownie — adres SQL jest przywracany z `artifacts/demo-settings.json`, zapisywanego podczas
-tworzenia bazy. Dla bazy utworzonej wcześniejszą wersją skryptu zapisz adres jednorazowo:
-
-```powershell
-.\scripts\Initialize-Secrets.ps1 -SqlServer sqlday-sql-b3mk2ducnyqow.database.windows.net
-uv run --frozen python -m presenter.verify
-```
-
-Oba polecenia uruchom w tym samym terminalu. Na innych systemach ustaw
-zmienne z `.env.example` przez lokalny menedżer sekretów; administrator dodatkowo potrzebuje
-`AW_ADMIN_USER` i `AW_ADMIN_PASSWORD`.
-
-Jeśli masz już AdventureWorksLT, alternatywą jest `scripts/Copy-DemoDatabase.ps1`.
-Kopiuje ją na tym samym serwerze i odmawia nadpisania istniejącej bazy demo.
-
-## 3. Uruchomienie lokalnego MCP
-
-W sesji z ustawionymi zmiennymi czytelnika i tokenem:
-
-```powershell
-# Usuwa też zmienne administratora z bieżącej sesji.
-.\scripts\Initialize-Secrets.ps1
-uv run --frozen uvicorn app.server:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log --log-config app/logging.json
-```
-
-W drugim terminalu załaduj te same sekrety i wykonaj:
-
-```powershell
-.\scripts\Initialize-Secrets.ps1
-uv run --frozen python -m scripts.smoke --url http://127.0.0.1:8000/mcp
-```
-
-`GET /health` sprawdza proces; pełny test uwierzytelnienia i połączenia SQL wykonuje `scripts.smoke`.
-Lokalny serwer również wymaga tokenu. Plik `.env` nie jest czytany automatycznie:
-jeśli wybierasz ten sposób konfiguracji, użyj `uv run --env-file .env ...`.
-
-W **MCP Inspector** (`npx @modelcontextprotocol/inspector`) wybierz Streamable HTTP,
-adres `http://127.0.0.1:8000/mcp` i nagłówek `Authorization: Bearer <token>`.
-Gdy Inspector używa bezpośredniego połączenia przeglądarkowego, korzystaj z jego proxy,
-aby nie wymagać otwierania CORS serwera. Token wpisuj przed rozpoczęciem udostępniania ekranu.
-
-## 4. Wdrożenie MCP do Azure
-
-```powershell
-.\scripts\Initialize-Secrets.ps1
-$sqlServerName = $env:AW_SQL_SERVER.Split('.')[0]
-.\scripts\Deploy-Azure.ps1 `
-  -ResourceGroup sqldaylite-demo-rg `
-  -SqlResourceGroup sqldaylite-demo-rg `
-  -SqlServer $sqlServerName `
-  -AppName sqlday-mcp `
-  -RegistryName sqldaymcpf2515b68 `
-  -PresenterIPv4 $presenterIp
-```
-
-Skrypt tworzy rejestr Basic, tożsamość do pobierania obrazów, Log Analytics i Container Apps
-z jedną repliką (0,5 vCPU, 1 GiB). Buduje obraz w ACR, zapisuje sekrety przez bezpieczne
-parametry Bicep i ustawia HTTPS `/mcp`. `CONTAINER_APP_HOSTNAME` jest automatycznie dołączany
-do listy dozwolonych hostów. Nie ma własnej domeny, API Management ani Kubernetes.
-
-Jeżeli nazwa rejestru jest zajęta globalnie, przekaż inną nazwę. W kolejnych wdrożeniach
-używaj tej samej; nowy `ImageTag` oznacza nową rewizję aplikacji.
-
-```powershell
-$mcpUrl = 'https://<adres-z-wdrozenia>/mcp'
-uv run --frozen python -m scripts.smoke --url $mcpUrl
-$env:AW_RUN_SQL_TESTS = '1'
-uv run --frozen pytest -q -m integration
-```
-
-Przed każdą próbą uruchom `Update-SqlFirewall.ps1` z tymi samymi parametrami grup, aplikacji,
-serwera i aktualnym `PresenterIPv4`, a następnie smoke test. Skrypt aktualizuje wyłącznie
-własne reguły `mcp-<app>-*`; nie włącza dostępu dla wszystkich usług Azure. Reguły SQL na
-serwerze logicznym dotyczą wszystkich jego baz. Pierwsza reguła `sqlday-presenter` pochodzi
-z utworzenia SQL; ponowne uruchomienie `New-DemoDatabase.ps1` aktualizuje ją przy zmianie IP.
-
-Autoryzacja Bearer jest celowym uproszczeniem demo, nie implementacją przepływu OAuth MCP.
-Przy udostępnieniu wielu użytkownikom należy zastąpić ją weryfikacją ich tożsamości.
-
-## 5. Podłączenie Codex i uczciwy pojedynek
-
-Wyeksportuj pliki do **nowego katalogu poza tym repozytorium**:
-
-```powershell
-uv run --frozen python -m scripts.export_workspaces --destination C:\demo\sqlday-run1 --url $mcpUrl
-```
-
-Powstaną trzy stanowiska:
-
-1. `with-mcp` — tylko pytania, neutralne instrukcje i projektowa konfiguracja MCP;
-2. `without-mcp` — pytania i neutralny skrypt SQL;
-3. `without-mcp-with-rules` — wariant kontrolny ze skryptem SQL i tymi samymi regułami.
-
-W obu stanowiskach terminalowych uruchom przed demo `uv sync --frozen --no-dev`.
-Uruchamiaj Codex z katalogu danego stanowiska. Dla `with-mcp` przekaż wyłącznie token MCP;
-dla pozostałych tylko dane konta SQL do odczytu. **Nigdy nie uruchamiaj agentów z procesów
-zawierających zmienne administratora.** Wyłącz inne MCP, pluginy, web i pamięć poprzednich prób.
-Ogranicz dostęp plikowy do stanowiska — same instrukcje AGENTS.md nie stanowią izolacji systemowej.
-
-Eksporter tworzy konfigurację:
-
-```toml
-[mcp_servers.adventureworks]
-url = "https://<aplikacja>.azurecontainerapps.io/mcp"
-bearer_token_env_var = "AW_MCP_TOKEN"
-tool_timeout_sec = 30
-```
-
-Zaufaj projektowi i sprawdź `/mcp` w Codex. Używaj tego samego modelu i poziomu rozumowania,
-świeżej rozmowy dla każdego pytania oraz limitu trzech minut. Na scenie: pytania **1, 2 i 5**;
-na próbach: wszystkie pięć. Próba z regułami w pliku pokazuje, ile daje wiedza biznesowa,
-a ile sposób jej udostępnienia. MCP nie gwarantuje poprawnej odpowiedzi.
-
-## Ograniczenia i diagnostyka
-
-- `query_sql`: jedno SELECT/CTE, 15 s czasu zapytania sterownika, 200 wierszy, 64 KiB JSON wyniku.
-  Limit wielkości nie obejmuje koperty MCP; SDK może równolegle udostępnić reprezentację tekstową.
-  `truncated=true` zawsze oznacza niepełny wynik. Duże wartości mogą wymagać pamięci sterownika,
-  zanim zostaną odrzucone przez limit odpowiedzi.
-- Dozwolone są wyłącznie jawnie wybrane obiekty i standardowe konstrukcje T-SQL.
-  Parser blokuje m.in. `SELECT INTO`, `NEXT VALUE FOR`, EXEC, zewnętrzne źródła i inne bazy.
-  Konto SQL jest niezależną granicą ochrony. To nie jest uniwersalna piaskownica T-SQL.
-- Kwoty są ciągami dziesiętnymi, daty ISO 8601. Serwer nie narzuca waluty.
-- Błędy sterownika są mapowane na bezpieczne kody; pełny SQL, hasła i tokeny nie są logowane.
-- `401`: token; `421`: Host/Origin; `SQL_UNAVAILABLE`: ODBC/firewall/login;
-  `SQL_INVALID`: składnia, nazwy kolumn lub uprawnienia. Zasób `/health` nie odpytuje SQL.
-- Prywatne oczekiwania i SQL: `uv run --frozen python -m presenter.verify`.
-  Reset: ponownie `presenter.prepare --reset-demo`, wyłącznie przed próbą, z kontem administratora.
-
-## Po sesji
-
-Zachowaj sprawdzony tag obrazu i nagranie. Starszą wersję można ponownie wdrożyć, wskazując
-jej obraz w konfiguracji Container App. Lokalny MCP jest zapasem dla problemów z hostingiem;
-Azure SQL i sam Codex nadal wymagają sieci. Przy braku internetu użyj nagrania.
-
-Zasoby naliczają opłaty również między próbami (SQL, rejestr, logi, działająca replika).
-Po zakończeniu usuń zasoby demo albo zmniejsz liczbę replik; nie usuwaj całej współdzielonej
-grupy zasobów bez sprawdzenia jej zawartości.
-
-Źródła: [MCP Python SDK](https://py.sdk.modelcontextprotocol.io/),
-[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli),
-[MCP na Azure](https://learn.microsoft.com/en-us/azure/container-apps/mcp-choosing-azure-service),
-[AdventureWorksLT](https://learn.microsoft.com/en-us/sql/samples/adventureworks-install-configure).
+`query_sql` przyjmuje jedno zapytanie SELECT/CTE do dozwolonych obiektów.
+Limit wynosi 15 sekund, 200 wierszy i 64 KiB wyniku JSON. `truncated=true` oznacza
+niepełny wynik. Konto SQL do odczytu stanowi dodatkowe ograniczenie uprawnień.
+Kwoty są zwracane jako ciągi dziesiętne, a daty w ISO 8601.

@@ -15,7 +15,7 @@ dev = ["pytest>=8,<10", "httpx>=0.28,<1", "httpx2>=2.13,<3", "ruff>=0.12,<1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["integration: requires the prepared Azure SQL demo database"]
+pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py312"

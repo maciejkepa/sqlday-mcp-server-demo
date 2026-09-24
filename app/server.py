@@ -1,4 +1,4 @@
-"""The part to build on stage: three tools, one resource, an HTTP endpoint."""
+"""Read-only AdventureWorks tools over authenticated Streamable HTTP."""
 
 import hashlib
 import hmac
@@ -29,7 +29,7 @@ mcp = MCPServer("AdventureWorks SQLDay", version="0.1.0", instructions=INSTRUCTI
 READ_ONLY = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
 )
-RULES_PATH = Path(__file__).resolve().parent.parent / "MCP instrukcje.md"
+RULES_PATH = Path(__file__).resolve().parent.parent / "docs" / "business-rules.md"
 
 
 async def invoke(name, function, *args):
@@ -47,9 +47,7 @@ async def invoke(name, function, *args):
     except Exception:
         # Deliberately no traceback/exception repr: DB drivers may include connection secrets.
         log.error("tool=%s status=internal_error", name)
-        raise ToolError(
-            "INTERNAL_ERROR: tool failed; ask the presenter to check configuration."
-        ) from None
+        raise ToolError("INTERNAL_ERROR: tool failed; check the server configuration.") from None
     log.info(
         "tool=%s elapsed_ms=%.2f rows=%s status=ok",
         name,

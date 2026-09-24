@@ -1,4 +1,4 @@
-"""Shared by MCP and the terminal baseline: same SQL permissions, timeouts and limits."""
+"""SQL connections, schema metadata and bounded query results."""
 
 import json
 import os

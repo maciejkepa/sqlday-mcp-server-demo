@@ -13,4 +13,3 @@ demo-workspaces/
 *.local.toml
 infra/*.json
 !infra/*.example.json
-tests/*

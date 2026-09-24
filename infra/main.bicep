@@ -72,6 +72,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           { name: 'AW_SQL_USER', value: sqlUser }
           { name: 'AW_SQL_PASSWORD', secretRef: 'sql-password' }
           { name: 'AW_MCP_TOKEN', secretRef: 'mcp-token' }
+          { name: 'AW_ALLOWED_HOSTS', value: '${appName}.${environment.properties.defaultDomain}' }
         ]
         probes: [
           { type: 'Liveness', httpGet: { path: '/health', port: 8000 }, initialDelaySeconds: 10, periodSeconds: 15 }

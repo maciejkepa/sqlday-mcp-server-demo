@@ -1,4 +1,4 @@
-"""Private numeric gold checks; no expected values are served through MCP."""
+"""Verify the seeded dataset against reference query results."""
 
 from pathlib import Path
 
@@ -26,7 +26,7 @@ def main():
     except QueryError as exc:
         print(f"Configuration error: {exc}")
         print(
-            "In this terminal, run scripts/Initialize-Secrets.ps1; on first use add -SqlServer <server>.database.windows.net."
+            "Configure .env, then run uv run --frozen --env-file .env python -m presenter.verify."
         )
         return 1
     failed = False

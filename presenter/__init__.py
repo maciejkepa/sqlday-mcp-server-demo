@@ -1,1 +1,1 @@
-"""Presenter-only setup and acceptance checks. Never copied to contestant workspaces."""
+"""Demo dataset preparation and result verification."""
