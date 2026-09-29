@@ -1,5 +1,7 @@
 # SQLDay: AdventureWorksLT + MCP + Codex
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/maciejkepa/sqlday-mcp-server-demo)](https://m8ven.ai/mcp/maciejkepa/sqlday-mcp-server-demo)
+
 Serwer MCP w Pythonie udostępniający bazę AdventureWorksLT do analiz przez Codex.
 Agent poznaje schemat i reguły biznesowe, a następnie wykonuje zapytania T-SQL przez
 trzy narzędzia: `get_schema`, `get_business_rules` i `query_sql`.
